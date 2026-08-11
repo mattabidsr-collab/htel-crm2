@@ -4,8 +4,9 @@ Heritage Telecom's (ACL Telecom LLC dba Heritage Telecom) operational system of 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the full requirements and phased delivery plan.
 
 This repository holds **Stage 0 (scaffold) + Stage 1 (Foundation) + Stage 2 (Telecom +
-contracts)**: auth/roles/MFA, the audit log, navigation, organizations/sites/contacts, and now
-telecom inventory, compliance, contracts, and renewal management.
+contracts) + call notes, SkySwitch CDR prefill, and Outlook email sync**: auth/roles/MFA, the
+audit log, navigation, organizations/sites/contacts, telecom inventory/compliance/contracts,
+call logging, and customer email synchronization.
 
 ## Stack
 
@@ -45,6 +46,12 @@ src/
     tendlc/             # 10DLC brands/campaigns
     ports/              # porting projects
     contracts/          # + renewal.ts (action deadline, alert task generation)
+    call-notes/
+    mailboxes/
+    email/              # matching.ts (pure) + sync.ts + review.ts (association review queue)
+  integrations/
+    skyswitch/           # CDR client (HTTP + mock) + sync orchestration
+    email/                # EmailProvider interface: Microsoft Graph (real) + mock
 ```
 
 Each module follows the same pattern: a service layer that enforces business rules (e.g. ACC-06
@@ -71,6 +78,11 @@ pnpm dev                       # http://localhost:3000
 
 Sign in with the seeded administrator, then immediately enroll MFA — the app enforces this
 before letting an administrator account do anything else (ADM-01).
+
+SkySwitch and Microsoft Graph (Outlook) credentials are optional — without them, `/admin/
+integrations` and `/admin/mailboxes` run against mock adapters that generate realistic data
+against real records already in the database, so the full sync/matching/review pipeline works
+without any external account. See `.env.example` for the credential env vars.
 
 Other scripts:
 
@@ -127,9 +139,38 @@ Documented simplifications from this pass:
 - `ServiceType` stays an enum rather than an admin-configurable reference table, consistent with
   Stage 1's `OrganizationType`/`ContactRole` enums
 
+Call notes, SkySwitch CDR prefill, and Outlook email sync, this pass:
+
+- Call notes (ACT-11/12/13): manual create from the org workspace, next-action creates a
+  linked Task, shown on the Activity tab
+- SkySwitch CDR adapter (`src/integrations/skyswitch/`): OAuth2 client-credentials HTTP client
+  (**endpoint schema unverified — this sandbox can't reach developers.skyswitch.com**) plus a
+  deterministic mock client; the sync matches caller/callee numbers against the DID inventory
+  and creates draft call notes flagged `needsReview` (a human still fills in the substantive
+  note, per spec 5.7.6), idempotent via `externalCallId`
+- Outlook email sync (section 5.6, ACT-06–15) via Microsoft Graph app-only auth (real adapter,
+  standard/documented API — unlike SkySwitch this isn't a guess, but Heritage's actual Entra ID
+  app registration is still unverified) plus a mock provider; HTML sanitized before storage
+  (ACT-14, strips scripts/tracking pixels), attachment metadata only — no bytes copied (ACT-15),
+  idempotent via `providerMessageId`
+- Participant matching (ACT-07): exact contact-email match only; conflicting/unmatched senders
+  land in the `/admin/email-review` queue rather than being guessed, with manual
+  associate/exclude actions (ACT-10), all audited
+- Exclusion rules (ACT-09): internal-domain and common automated-sender patterns
+  (`noreply@`, etc.) auto-excluded from customer timelines
+- `/admin/integrations` shows live-vs-mock status per integration and triggers syncs on demand
+  (still no cron infra)
+
+Verified live in this pass: the full mock-provider pipeline end-to-end (CDR matching → draft
+call note → review completion; email ingestion → sanitization → matching/exclusion/ambiguous
+routing → manual association), including idempotency on repeated syncs. Not verified: the real
+SkySwitch and Microsoft Graph HTTP calls themselves — no live credentials were available.
+
 Not yet built (see `docs/BUILD_SPEC.md` section 14 for the staged delivery plan):
 
-- Vision ticket integration, billing reconciliation, email sync, dashboards, GoHighLevel sync
-  (Stages 3–5)
+- Vision ticket integration, billing reconciliation, dashboards, GoHighLevel sync (Stages 3–5)
 - Record-level permissions (MVP uses module-level roles per spec section 3)
-- Contact/site/service/DID edit and delete flows (create + list only so far)
+- Contact/site/service/DID/call-note/email edit and delete flows
+- Global quick-create for call notes (ACT-13 mentions this alongside the account-workspace
+  path, which is built); OAuth consent-flow UI for connecting a real Outlook mailbox (mailboxes
+  are registered directly today, not through an interactive Microsoft consent screen)

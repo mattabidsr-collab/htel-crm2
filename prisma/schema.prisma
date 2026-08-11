@@ -45,6 +45,7 @@ model User {
   ownedTasks         Task[]          @relation("TaskOwner")
   createdTasks       Task[]          @relation("TaskCreatedBy")
   ownedContracts     Contract[]      @relation("ContractOwner")
+  connectedMailboxes Mailbox[]
 
   @@map("users")
 }
@@ -108,6 +109,7 @@ model Organization {
   portProjects     PortProject[]
   contracts        Contract[]
   mrrSnapshots     MrrSnapshot[]
+  emailThreads     EmailThread[]
 
   @@index([parentId])
   @@index([lifecycleStatus])
@@ -178,6 +180,7 @@ model Contact {
   affiliations  ContactAffiliation[]
   sitesAsContact Site[]
   callNotes     CallNote[]
+  emailMessages EmailMessage[]
 
   @@index([lastName, firstName])
   @@map("contacts")
@@ -219,23 +222,38 @@ enum CallDirection {
   OUTBOUND
 }
 
+// Phase 1 supports manual call notes; Phase 2 may prefill call metadata
+// from CTI/call records, but a human remains responsible for the
+// substantive note and outcome (spec 5.7.6) — CDR-sourced notes are
+// created with needsReview=true and a placeholder summary.
+enum CallNoteSource {
+  MANUAL
+  SKYSWITCH_CDR
+}
+
 model CallNote {
-  id             String        @id @default(uuid()) @db.Uuid
-  organizationId String        @db.Uuid
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  siteId         String?       @db.Uuid
-  site           Site?         @relation(fields: [siteId], references: [id])
-  contactId      String?       @db.Uuid
-  contact        Contact?      @relation(fields: [contactId], references: [id])
-  authorId       String        @db.Uuid
-  author         User          @relation(fields: [authorId], references: [id])
-  occurredAt     DateTime      @default(now())
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  organization   Organization   @relation(fields: [organizationId], references: [id])
+  siteId         String?        @db.Uuid
+  site           Site?          @relation(fields: [siteId], references: [id])
+  contactId      String?        @db.Uuid
+  contact        Contact?       @relation(fields: [contactId], references: [id])
+  didId          String?        @db.Uuid
+  did            DID?           @relation(fields: [didId], references: [id])
+  authorId       String?        @db.Uuid // null for not-yet-reviewed CDR-sourced notes
+  author         User?          @relation(fields: [authorId], references: [id])
+  occurredAt     DateTime       @default(now())
   direction      CallDirection
-  participants   String[]      @default([])
+  participants   String[]       @default([])
   summary        String
   disposition    String?
   nextAction     String?
-  createdAt      DateTime      @default(now())
+  source         CallNoteSource @default(MANUAL)
+  needsReview    Boolean        @default(false)
+  durationSeconds Int?
+  externalCallId String?        @unique // SkySwitch CDR ID, for idempotent sync
+  createdAt      DateTime       @default(now())
 
   @@index([organizationId])
   @@map("call_notes")
@@ -410,6 +428,7 @@ model DID {
 
   e911Registrations E911Registration[]
   portItems         PortItem[]
+  callNotes         CallNote[]
 
   @@index([organizationId])
   @@map("dids")
@@ -588,6 +607,102 @@ model MrrSnapshot {
 
   @@index([organizationId, periodEnd])
   @@map("mrr_snapshots")
+}
+
+// --- Customer email synchronization (section 5.6 / ACT-06-15) -------------
+
+enum MailboxProvider {
+  MICROSOFT
+  // Generates realistic fixtures against real contacts, with no external
+  // dependency — used to exercise the full sync/matching/review pipeline
+  // in environments without live OAuth credentials.
+  MOCK
+}
+
+enum MailboxStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model Mailbox {
+  id                     String          @id @default(uuid()) @db.Uuid
+  emailAddress           String          @unique
+  provider               MailboxProvider
+  status                 MailboxStatus   @default(CONNECTED)
+  accessTokenEncrypted   String?
+  refreshTokenEncrypted  String?
+  tokenExpiresAt         DateTime?
+  connectedByUserId      String?         @db.Uuid
+  connectedByUser        User?           @relation(fields: [connectedByUserId], references: [id])
+  lastSyncedAt           DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  threads  EmailThread[]
+  messages EmailMessage[]
+
+  @@map("mailboxes")
+}
+
+// ACT-07: exact contact match first; ambiguous/conflicting matches enter a
+// review queue and are never silently guessed.
+enum EmailAssociationStatus {
+  PENDING
+  ASSOCIATED
+  AMBIGUOUS
+  EXCLUDED
+}
+
+model EmailThread {
+  id                String                 @id @default(uuid()) @db.Uuid
+  mailboxId         String                 @db.Uuid
+  mailbox           Mailbox                @relation(fields: [mailboxId], references: [id])
+  providerThreadId  String
+  subject           String?
+  organizationId    String?                @db.Uuid
+  organization      Organization?          @relation(fields: [organizationId], references: [id])
+  associationStatus EmailAssociationStatus @default(PENDING)
+  associationNote   String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  messages EmailMessage[]
+
+  @@unique([mailboxId, providerThreadId])
+  @@index([organizationId])
+  @@map("email_threads")
+}
+
+enum EmailDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model EmailMessage {
+  id                 String         @id @default(uuid()) @db.Uuid
+  mailboxId          String         @db.Uuid
+  mailbox            Mailbox        @relation(fields: [mailboxId], references: [id])
+  threadId           String         @db.Uuid
+  thread             EmailThread    @relation(fields: [threadId], references: [id])
+  providerMessageId  String
+  direction          EmailDirection
+  fromAddress        String
+  toAddresses        String[]       @default([])
+  ccAddresses        String[]       @default([])
+  subject            String?
+  bodyText           String?
+  bodyHtmlSanitized  String? // scripts/tracking/unsafe content stripped (ACT-14)
+  sentAt             DateTime
+  contactId          String?        @db.Uuid
+  contact            Contact?       @relation(fields: [contactId], references: [id])
+  // Attachment metadata only — bytes stay in the source mailbox (ACT-15).
+  attachments        Json?
+  createdAt          DateTime       @default(now())
+
+  @@unique([mailboxId, providerMessageId])
+  @@index([threadId])
+  @@map("email_messages")
 }
 
 // --- Audit (ADM-03) -------------------------------------------------------

@@ -257,6 +257,51 @@ a {
   background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
+.badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sync-button {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sync-button__result {
+  font-size: 0.8rem;
+  color: color-mix(in srgb, var(--foreground) 65%, transparent);
+}
+
+.email-thread {
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding: 0.6rem 0;
+  font-size: 0.875rem;
+}
+
+.email-thread summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.email-message {
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.email-message__meta {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  margin-bottom: 0.3rem;
+}
+
+.email-message__body {
+  font-size: 0.875rem;
+  overflow-wrap: break-word;
+}
+
 .settings-page {
   max-width: 480px;
   display: flex;

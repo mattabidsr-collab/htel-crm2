@@ -19,6 +19,17 @@ const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
+
+  // Optional integration credentials. Absent in dev/test — those paths
+  // fall back to mock adapters so the surrounding pipeline stays testable.
+  SKYSWITCH_CLIENT_ID: z.string().optional(),
+  SKYSWITCH_CLIENT_SECRET: z.string().optional(),
+  SKYSWITCH_API_BASE_URL: z.string().optional(),
+  SKYSWITCH_TOKEN_URL: z.string().optional(),
+
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_TENANT_ID: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

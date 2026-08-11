@@ -40,6 +40,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   <>
                     <Link href="/admin/users">Users</Link>
                     <Link href="/admin/audit-log">Audit Log</Link>
+                    <Link href="/admin/integrations">Integrations</Link>
+                    <Link href="/admin/mailboxes">Mailboxes</Link>
+                    <Link href="/admin/email-review">Email Review</Link>
                   </>
                 )}
               </nav>
