@@ -1,0 +1,249 @@
+// Heritage CRM — baseline schema (scaffold stage).
+//
+// Conventions (per build spec section 7):
+// - UUID primary keys
+// - UTC timestamps
+// - Soft deletion where recovery is operationally required
+// - Explicit ownership fields even though the first release serves only Heritage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Identity -----------------------------------------------------------
+
+enum UserRole {
+  ADMINISTRATOR
+  OPERATIONS_LEADER
+  SUPPORT
+  SALES
+  BILLING_ADMIN
+  READ_ONLY
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         UserRole
+  mfaEnabled   Boolean   @default(false)
+  mfaSecretRef String? // reference into the secrets manager; never a raw secret (TEL-10)
+  isActive     Boolean   @default(true)
+  deactivatedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  ownedOrganizations Organization[]  @relation("OrganizationOwner")
+  auditEvents        AuditEvent[]
+  callNotes          CallNote[]
+
+  @@map("users")
+}
+
+// --- Accounts, sites, contacts (section 6.2) -----------------------------
+
+enum OrganizationType {
+  PROSPECT
+  CUSTOMER
+  FORMER_CUSTOMER
+  PARTNER
+  VENDOR
+  RELATED_PARTY
+}
+
+enum LifecycleStatus {
+  PROSPECT
+  ONBOARDING
+  ACTIVE
+  AT_RISK
+  FORMER
+}
+
+model Organization {
+  id              String             @id @default(uuid()) @db.Uuid
+  name            String
+  legalName       String?
+  dba             String?
+  parentId        String?            @db.Uuid
+  parent          Organization?      @relation("OrganizationHierarchy", fields: [parentId], references: [id])
+  children        Organization[]     @relation("OrganizationHierarchy")
+  types           OrganizationType[]
+  vertical        String?
+  lifecycleStatus LifecycleStatus    @default(PROSPECT)
+  billingCustomerId String?
+  ownerId         String?            @db.Uuid
+  owner           User?              @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  source          String?
+  taxStatus       String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String?
+  latitude        Float?
+  longitude       Float?
+  tags            String[]           @default([])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  deletedAt       DateTime? // ACC records may be archived, not hard-deleted (business rule 6)
+
+  sites        Site[]
+  affiliations ContactAffiliation[]
+  callNotes    CallNote[]
+
+  @@index([parentId])
+  @@index([lifecycleStatus])
+  @@map("organizations")
+}
+
+enum SiteStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+model Site {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  name           String
+  status         SiteStatus @default(PENDING)
+  timezone       String     @default("America/Detroit")
+
+  serviceAddressLine1 String?
+  serviceAddressLine2 String?
+  serviceCity         String?
+  serviceState        String?
+  servicePostalCode   String?
+
+  billingAddressLine1 String?
+  billingAddressLine2 String?
+  billingCity         String?
+  billingState        String?
+  billingPostalCode   String?
+
+  dispatchableAddressLine1 String?
+  dispatchableAddressLine2 String?
+  dispatchableCity         String?
+  dispatchableState        String?
+  dispatchablePostalCode   String?
+
+  siteContactId String?  @db.Uuid
+  siteContact   Contact? @relation(fields: [siteContactId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  affiliations ContactAffiliation[]
+  callNotes    CallNote[]
+
+  @@index([organizationId])
+  @@map("sites")
+}
+
+model Contact {
+  id               String   @id @default(uuid()) @db.Uuid
+  firstName        String
+  lastName         String
+  emails           String[] @default([])
+  phones           String[] @default([])
+  preferredChannel String?
+  emailOptIn       Boolean  @default(false)
+  smsOptIn         Boolean  @default(false)
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  affiliations  ContactAffiliation[]
+  sitesAsContact Site[]
+  callNotes     CallNote[]
+
+  @@index([lastName, firstName])
+  @@map("contacts")
+}
+
+enum ContactRole {
+  DECISION_MAKER
+  CHAMPION
+  TECHNICAL
+  BILLING
+  EMERGENCY
+  SITE_CONTACT
+  FORMER
+}
+
+model ContactAffiliation {
+  id             String       @id @default(uuid()) @db.Uuid
+  contactId      String       @db.Uuid
+  contact        Contact      @relation(fields: [contactId], references: [id])
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  siteId         String?      @db.Uuid
+  site           Site?        @relation(fields: [siteId], references: [id])
+  role           ContactRole
+  title          String?
+  isPrimary      Boolean      @default(false)
+  startDate      DateTime     @default(now())
+  endDate        DateTime?
+
+  @@index([contactId])
+  @@index([organizationId])
+  @@map("contact_affiliations")
+}
+
+// --- Call notes (section 5.7 / ACT-11-13) --------------------------------
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model CallNote {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  siteId         String?       @db.Uuid
+  site           Site?         @relation(fields: [siteId], references: [id])
+  contactId      String?       @db.Uuid
+  contact        Contact?      @relation(fields: [contactId], references: [id])
+  authorId       String        @db.Uuid
+  author         User          @relation(fields: [authorId], references: [id])
+  occurredAt     DateTime      @default(now())
+  direction      CallDirection
+  participants   String[]      @default([])
+  summary        String
+  disposition    String?
+  nextAction     String?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId])
+  @@map("call_notes")
+}
+
+// --- Audit (ADM-03) -------------------------------------------------------
+
+model AuditEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  occurredAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([occurredAt])
+  @@map("audit_events")
+}

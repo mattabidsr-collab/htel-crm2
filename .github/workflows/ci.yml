@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://htelcrm:htelcrm@localhost:5432/htelcrm?schema=public
+      REDIS_URL: redis://localhost:6379
+      AUTH_SECRET: ci-placeholder-secret
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_BUCKET: htel-crm-documents
+      STORAGE_ACCESS_KEY_ID: htelcrm
+      STORAGE_SECRET_ACCESS_KEY: htelcrm123
+      STORAGE_FORCE_PATH_STYLE: "true"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: htelcrm
+          POSTGRES_PASSWORD: htelcrm
+          POSTGRES_DB: htelcrm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U htelcrm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm prisma migrate deploy
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      - run: pnpm build
