@@ -33,7 +33,7 @@ export default function LoginPage() {
     setSubmitting(false);
 
     if (!result || result.error) {
-      const code = result?.error ?? "invalid_credentials";
+      const code = result?.code ?? "invalid_credentials";
       if (code === "mfa_required") {
         setMfaRequired(true);
         return;
