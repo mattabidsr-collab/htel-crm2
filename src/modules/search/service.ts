@@ -1,15 +1,15 @@
 import { db } from "@/lib/db";
 
-// ADM-04: global search across organizations, sites, and contacts (name,
-// DBA, email, phone). DIDs, domains, and Vision ticket IDs join in as
-// those modules land in later stages. Simple ILIKE for MVP scale; move to
-// Postgres trigram indexes if this gets slow (section 12).
+// ADM-04: global search across organizations, sites, contacts, and DIDs
+// (name, DBA, email, phone, number). Vision ticket IDs and domains join in
+// as those modules land in later stages. Simple ILIKE/contains for MVP
+// scale; move to Postgres trigram indexes if this gets slow (section 12).
 export async function searchAll(query: string) {
   if (query.trim().length < 2) {
-    return { organizations: [], sites: [], contacts: [] };
+    return { organizations: [], sites: [], contacts: [], dids: [] };
   }
 
-  const [organizations, sites, contacts] = await Promise.all([
+  const [organizations, sites, contacts, dids] = await Promise.all([
     db.organization.findMany({
       where: {
         deletedAt: null,
@@ -47,7 +47,12 @@ export async function searchAll(query: string) {
       include: { affiliations: { take: 1, include: { organization: { select: { id: true, name: true } } } } },
       take: 10,
     }),
+    db.dID.findMany({
+      where: { number: { contains: query } },
+      include: { organization: { select: { id: true, name: true } } },
+      take: 10,
+    }),
   ]);
 
-  return { organizations, sites, contacts };
+  return { organizations, sites, contacts, dids };
 }

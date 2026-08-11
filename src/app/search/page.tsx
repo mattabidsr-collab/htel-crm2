@@ -5,7 +5,7 @@ import { searchAll } from "@/modules/search/service";
 export default async function SearchPage(props: PageProps<"/search">) {
   const searchParams = await props.searchParams;
   const q = typeof searchParams.q === "string" ? searchParams.q : "";
-  const results = q ? await searchAll(q) : { organizations: [], sites: [], contacts: [] };
+  const results = q ? await searchAll(q) : { organizations: [], sites: [], contacts: [], dids: [] };
 
   return (
     <div>
@@ -55,9 +55,23 @@ export default async function SearchPage(props: PageProps<"/search">) {
         </ul>
       </section>
 
+      <section className="home__card">
+        <h2>Numbers ({results.dids.length})</h2>
+        <ul>
+          {results.dids.map((did) => (
+            <li key={did.id}>
+              <Link href={`/organizations/${did.organizationId}/telecom`}>
+                {did.number} — {did.organization.name}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {results.organizations.length === 0 &&
         results.sites.length === 0 &&
-        results.contacts.length === 0 && <p className="home__empty-state">No matches.</p>}
+        results.contacts.length === 0 &&
+        results.dids.length === 0 && <p className="home__empty-state">No matches.</p>}
     </div>
   );
 }

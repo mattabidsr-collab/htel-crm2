@@ -44,6 +44,7 @@ model User {
   callNotes          CallNote[]
   ownedTasks         Task[]          @relation("TaskOwner")
   createdTasks       Task[]          @relation("TaskCreatedBy")
+  ownedContracts     Contract[]      @relation("ContractOwner")
 
   @@map("users")
 }
@@ -96,10 +97,17 @@ model Organization {
   updatedAt       DateTime           @updatedAt
   deletedAt       DateTime? // ACC records may be archived, not hard-deleted (business rule 6)
 
-  sites        Site[]
-  affiliations ContactAffiliation[]
-  callNotes    CallNote[]
-  tasks        Task[]
+  sites            Site[]
+  affiliations     ContactAffiliation[]
+  callNotes        CallNote[]
+  tasks            Task[]
+  platformAccounts PlatformAccount[]
+  services         Service[]
+  dids             DID[]
+  tenDlcBrands     TenDlcBrand[]
+  portProjects     PortProject[]
+  contracts        Contract[]
+  mrrSnapshots     MrrSnapshot[]
 
   @@index([parentId])
   @@index([lifecycleStatus])
@@ -147,6 +155,7 @@ model Site {
 
   affiliations ContactAffiliation[]
   callNotes    CallNote[]
+  services     Service[]
 
   @@index([organizationId])
   @@map("sites")
@@ -271,6 +280,314 @@ model Task {
   @@index([ownerId, status, dueDate])
   @@index([organizationId])
   @@map("tasks")
+}
+
+// --- Telecom inventory and compliance (section 6.3) -----------------------
+
+enum PlatformProvider {
+  SKYSWITCH
+  NETSAPIENS
+  OTHER
+}
+
+model PlatformAccount {
+  id                 String           @id @default(uuid()) @db.Uuid
+  organizationId     String           @db.Uuid
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  provider           PlatformProvider
+  providerAccountId  String? // e.g. SkySwitch account ID
+  subAccountId       String?
+  resellerId         String?
+  netsapiensDomain   String?
+  status             String           @default("active")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  services Service[]
+
+  @@index([organizationId])
+  @@map("platform_accounts")
+}
+
+// TEL-03: configurable service types. Kept as an enum for MVP consistency
+// with other typed vocabularies (OrganizationType, ContactRole); promoting
+// this to an admin-configurable reference table is a documented follow-up.
+enum ServiceType {
+  HOSTED_SEAT
+  CONVENIENCE_SEAT
+  FAX
+  CONTACT_CENTER
+  SMS
+  RABBITRUN
+  DIA
+  NUMBER_DID
+  HARDWARE
+  OTHER_RECURRING
+}
+
+enum ServiceStatus {
+  ACTIVE
+  PENDING
+  SUSPENDED
+  TERMINATED
+}
+
+model Service {
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @db.Uuid
+  organization      Organization     @relation(fields: [organizationId], references: [id])
+  siteId            String?          @db.Uuid
+  site              Site?            @relation(fields: [siteId], references: [id])
+  platformAccountId String?          @db.Uuid
+  platformAccount   PlatformAccount? @relation(fields: [platformAccountId], references: [id])
+  type              ServiceType
+  tier              String?
+  status            ServiceStatus    @default(PENDING)
+  quantity          Int              @default(1)
+  unitPrice         Decimal          @db.Decimal(12, 2)
+  // Nullable: an incomplete cost mapping must show "Incomplete", never a
+  // misleading zero (business rule 2 / CON-06).
+  unitCost          Decimal?         @db.Decimal(12, 2)
+  vendor            String?
+  vendorSku         String?
+  activationDate    DateTime?
+  terminationDate   DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  dids DID[]
+
+  @@index([organizationId])
+  @@index([siteId])
+  @@map("services")
+}
+
+enum DidStatus {
+  ACTIVE
+  PORT_PENDING
+  RESERVED
+  DISCONNECTED
+}
+
+enum SmsStatus {
+  NOT_ENABLED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum E911Status {
+  NOT_REQUIRED
+  PENDING
+  VERIFIED
+  EXCEPTION
+}
+
+enum PortStatus {
+  NONE
+  REQUESTED
+  FOC_RECEIVED
+  COMPLETED
+  REJECTED
+}
+
+model DID {
+  id                String         @id @default(uuid()) @db.Uuid
+  number            String         @unique // E.164
+  organizationId    String         @db.Uuid
+  organization      Organization   @relation(fields: [organizationId], references: [id])
+  serviceId         String?        @db.Uuid
+  service           Service?       @relation(fields: [serviceId], references: [id])
+  tenDlcCampaignId  String?        @db.Uuid
+  tenDlcCampaign    TenDlcCampaign? @relation(fields: [tenDlcCampaignId], references: [id])
+  provider          String?
+  status            DidStatus      @default(ACTIVE)
+  smsStatus         SmsStatus      @default(NOT_ENABLED)
+  e911Status        E911Status     @default(NOT_REQUIRED)
+  portStatus        PortStatus     @default(NONE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  e911Registrations E911Registration[]
+  portItems         PortItem[]
+
+  @@index([organizationId])
+  @@map("dids")
+}
+
+model E911Registration {
+  id                       String     @id @default(uuid()) @db.Uuid
+  didId                    String     @db.Uuid
+  did                      DID        @relation(fields: [didId], references: [id])
+  dispatchableAddressLine1 String?
+  dispatchableAddressLine2 String?
+  dispatchableCity         String?
+  dispatchableState        String?
+  dispatchablePostalCode   String?
+  providerReference        String?
+  status                   E911Status @default(PENDING)
+  lastVerifiedDate         DateTime?
+  exceptionReason          String?
+  createdAt                DateTime   @default(now())
+
+  @@index([didId])
+  @@map("e911_registrations")
+}
+
+enum TenDlcStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model TenDlcBrand {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @db.Uuid
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  providerBrandId  String?
+  legalName        String?
+  status           TenDlcStatus @default(DRAFT)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  campaigns TenDlcCampaign[]
+
+  @@index([organizationId])
+  @@map("ten_dlc_brands")
+}
+
+model TenDlcCampaign {
+  id                 String       @id @default(uuid()) @db.Uuid
+  brandId            String       @db.Uuid
+  brand              TenDlcBrand  @relation(fields: [brandId], references: [id])
+  providerCampaignId String?
+  useCase            String?
+  status             TenDlcStatus @default(DRAFT)
+  rejectionReason    String?
+  reviewDate         DateTime?
+  renewalDate        DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  linkedDids DID[]
+
+  @@index([brandId])
+  @@map("ten_dlc_campaigns")
+}
+
+enum PortProjectStatus {
+  DRAFT
+  SUBMITTED
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model PortProject {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  organization    Organization      @relation(fields: [organizationId], references: [id])
+  losingCarrier   String?
+  status          PortProjectStatus @default(DRAFT)
+  requestedDate   DateTime?
+  focDate         DateTime?
+  completedDate   DateTime?
+  rejectionReason String?
+  documentKey     String? // future object-storage reference (ACT-04 not yet built)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  items PortItem[]
+
+  @@index([organizationId])
+  @@map("port_projects")
+}
+
+model PortItem {
+  id            String            @id @default(uuid()) @db.Uuid
+  portProjectId String            @db.Uuid
+  portProject   PortProject       @relation(fields: [portProjectId], references: [id])
+  didNumber     String
+  didId         String?           @db.Uuid
+  did           DID?              @relation(fields: [didId], references: [id])
+  status        PortProjectStatus @default(DRAFT)
+  createdAt     DateTime          @default(now())
+
+  @@index([portProjectId])
+  @@map("port_items")
+}
+
+// --- Contracts, revenue, and renewals (section 6.4) ------------------------
+
+enum ContractType {
+  MSA
+  SOW
+  AMENDMENT
+  OTHER
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  RENEWED
+}
+
+enum RenewalDisposition {
+  PENDING
+  RENEWED
+  EXPANDED
+  DOWNSIZED
+  CHURNED
+  MONTH_TO_MONTH
+}
+
+model Contract {
+  id                 String             @id @default(uuid()) @db.Uuid
+  // CON-03 (multi-org/site coverage) is scoped down to one organization per
+  // contract for this pass; documented as a follow-up.
+  organizationId     String             @db.Uuid
+  organization       Organization       @relation(fields: [organizationId], references: [id])
+  type               ContractType       @default(MSA)
+  status             ContractStatus     @default(DRAFT)
+  signedDate         DateTime?
+  effectiveDate      DateTime?
+  endDate            DateTime?
+  termMonths         Int?
+  autoRenew          Boolean            @default(false)
+  noticeDays         Int                @default(60)
+  documentKey        String? // future object-storage reference (ACT-04 not yet built)
+  ownerId            String?            @db.Uuid
+  owner              User?              @relation("ContractOwner", fields: [ownerId], references: [id])
+  renewalDisposition RenewalDisposition @default(PENDING)
+  renewalNotes       String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([organizationId])
+  @@index([endDate])
+  @@map("contracts")
+}
+
+// CON-05: MRR snapshots preserve period history. No automated monthly job
+// is wired up yet (no cron infra); snapshots are captured on demand.
+model MrrSnapshot {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  periodEnd      DateTime
+  mrr            Decimal      @db.Decimal(12, 2)
+  activeServices Int
+  activeSeats    Int
+  activeDids     Int
+  capturedAt     DateTime     @default(now())
+
+  @@index([organizationId, periodEnd])
+  @@map("mrr_snapshots")
 }
 
 // --- Audit (ADM-03) -------------------------------------------------------

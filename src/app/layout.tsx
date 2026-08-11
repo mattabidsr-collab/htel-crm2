@@ -35,6 +35,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <nav className="app-header__nav">
                 <Link href="/">My Work</Link>
                 <Link href="/organizations">Organizations</Link>
+                <Link href="/renewals">Renewals</Link>
                 {session.user.role === "ADMINISTRATOR" && (
                   <>
                     <Link href="/admin/users">Users</Link>

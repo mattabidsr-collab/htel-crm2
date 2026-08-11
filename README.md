@@ -3,9 +3,9 @@
 Heritage Telecom's (ACL Telecom LLC dba Heritage Telecom) operational system of record. See
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the full requirements and phased delivery plan.
 
-This repository holds **Stage 0 (scaffold) + Stage 1 (Foundation)**: auth/roles/MFA, the audit
-log, navigation, and organizations/sites/contacts, on the modular-monolith foundation from
-Stage 0.
+This repository holds **Stage 0 (scaffold) + Stage 1 (Foundation) + Stage 2 (Telecom +
+contracts)**: auth/roles/MFA, the audit log, navigation, organizations/sites/contacts, and now
+telecom inventory, compliance, contracts, and renewal management.
 
 ## Stack
 
@@ -38,6 +38,13 @@ src/
     auth/               # MFA enrollment/verification
     audit/
     search/
+    telecom/            # calc.ts (pure math) + metrics.ts (MRR/seat/DID) + compliance.ts (TEL-09)
+    platform-accounts/
+    services/
+    dids/
+    tendlc/             # 10DLC brands/campaigns
+    ports/              # porting projects
+    contracts/          # + renewal.ts (action deadline, alert task generation)
 ```
 
 Each module follows the same pattern: a service layer that enforces business rules (e.g. ACC-06
@@ -93,13 +100,36 @@ Stage 1 (Foundation), this pass:
   on organization name and contact email
 - Organization workspace with the section 8.2 tab structure — Overview/Sites/Contacts are live;
   Telecom/Contracts/Vision Tickets/Opportunities/Activity show what stage they land in
-- Global search across organizations, sites, and contacts (ADM-04)
+- Global search across organizations, sites, contacts, and now DIDs (ADM-04)
 - Home/My Work wired to real overdue and upcoming tasks (ADM-06), with quick task creation and
   completion from both the org workspace and the home page
 
+Stage 2 (Telecom + contracts), this pass:
+
+- Platform accounts, services (with live MRR/seat/DID counts per business rules 1 and TEL-04),
+  DIDs with SMS/E911/port status, 10DLC brands & campaigns, and porting projects
+- TEL-09 compliance exceptions (active SMS without an approved 10DLC campaign; active DID with
+  E911 still pending), surfaced on the Telecom tab
+- Contracts with auto-computed action deadline (business rule 3) and auto-generated renewal
+  alert tasks at 180/120/90/60/30 days out (CON-02); recording a renewal disposition requires a
+  new end date and term when marked RENEWED (business rule 6)
+- Renewals workspace (section 8.5) bucketing all contracts by action deadline
+- Org header and Home/My Work now show real MRR and urgent renewals instead of placeholders
+
+Documented simplifications from this pass:
+
+- Contracts are scoped to one organization each (CON-03's multi-org/multi-site coverage is not
+  modeled)
+- No automated monthly MRR-snapshot job — the `MrrSnapshot` model and `captureMrrSnapshot()`
+  exist, but nothing schedules it yet (no cron infra); CON-05 history is available on demand only
+- Contract/port documents are schema fields (`documentKey`) only — no upload UI, since that needs
+  the file-storage pipeline from ACT-04, which isn't built yet
+- `ServiceType` stays an enum rather than an admin-configurable reference table, consistent with
+  Stage 1's `OrganizationType`/`ContactRole` enums
+
 Not yet built (see `docs/BUILD_SPEC.md` section 14 for the staged delivery plan):
 
-- Telecom inventory, contracts/renewals, Vision ticket integration, billing reconciliation,
-  email sync, dashboards, GoHighLevel sync (Stages 2–5)
+- Vision ticket integration, billing reconciliation, email sync, dashboards, GoHighLevel sync
+  (Stages 3–5)
 - Record-level permissions (MVP uses module-level roles per spec section 3)
-- Contact/site edit and delete flows (create + list only so far)
+- Contact/site/service/DID edit and delete flows (create + list only so far)

@@ -2,12 +2,16 @@ import { notFound } from "next/navigation";
 
 import { OrgTabs } from "@/components/OrgTabs";
 import * as organizationsService from "@/modules/organizations/service";
+import { calcMrr } from "@/modules/telecom/metrics";
 
 export default async function OrganizationLayout(
   props: LayoutProps<"/organizations/[id]">,
 ) {
   const { id } = await props.params;
-  const organization = await organizationsService.getOrganization(id);
+  const [organization, mrr] = await Promise.all([
+    organizationsService.getOrganization(id),
+    calcMrr(id),
+  ]);
   if (!organization) notFound();
 
   return (
@@ -29,11 +33,11 @@ export default async function OrganizationLayout(
           </div>
           <div>
             <dt>MRR</dt>
-            <dd>Not yet available</dd>
+            <dd>${mrr.mrr.toFixed(2)}</dd>
           </div>
           <div>
             <dt>Est. margin</dt>
-            <dd>Incomplete</dd>
+            <dd>{mrr.estimatedMargin === null ? "Incomplete" : `$${mrr.estimatedMargin.toFixed(2)}`}</dd>
           </div>
           <div>
             <dt>Health</dt>

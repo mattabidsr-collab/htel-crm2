@@ -410,3 +410,29 @@ a {
   font-size: 0.75rem;
   padding: 0.2rem 0.5rem;
 }
+
+.telecom-exceptions {
+  border-color: #d97706;
+}
+
+.telecom-exceptions h2 {
+  color: #d97706;
+}
+
+.telecom-exceptions ul {
+  font-size: 0.875rem;
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.tendlc-brand {
+  border-top: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  padding: 0.75rem 0;
+  font-size: 0.875rem;
+}
+
+.tendlc-brand ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0.4rem 0;
+}
