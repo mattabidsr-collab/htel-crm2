@@ -193,11 +193,15 @@ Vision's real API shape came from the user's own live system access, not public 
 sandbox's egress proxy blocks `visionhelpdesk.com` and its subdomains) — confirmed details:
 tickets are addressed by **two** IDs, a mask (e.g. `QBZC-364991`) and a numeric ID (e.g. `78077`),
 both captured on the projection; requests are `GET` with query-string params against
-`/api/index.php`, using a `vis_module`/`vis_operation` convention (confirmed for
-`ticket_details`), `vis_encode=json`, and auth via either `vis_txttoken` or
-`vis_txtusername`/MD5-hashed `vis_txtuserpass`. Unconfirmed: the bulk/recent-tickets operation
-name used by `fetchRecentTickets()` (`get_tickets`) — only single-ticket lookup was confirmed in
-the doc excerpt provided, so this is a documented guess pending the real API reference.
+`/api/index.php`, using a `vis_module`/`vis_operation` convention (confirmed for both
+`ticket_details` and bulk listing via `get_tickets`), `vis_encode=json`, and auth via either
+`vis_txttoken` (passed as-is, unhashed) or `vis_txtusername`/MD5-hashed `vis_txtuserpass`. Bulk
+listing also supports a `vis_filter=<field>=<value>` query param (confirmed example:
+`status_id=1`). Unconfirmed: Vision's numeric `status_id` scheme (which values mean open vs.
+closed) and whether any date-range/"updated since" filter exists — `status_id` is the only
+confirmed `vis_filter` field, so the real client currently fetches the full ticket list on every
+sync rather than guessing a filter param, relying on the idempotent upsert to keep repeat syncs
+cheap.
 
 Not yet built (see `docs/BUILD_SPEC.md` section 14 for the staged delivery plan):
 

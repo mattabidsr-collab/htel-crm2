@@ -12,22 +12,28 @@ export interface VisionAuth {
 /**
  * HTTP adapter for Vision Helpdesk's ticket API.
  *
- * CONFIRMED (from Vision Helpdesk's own "API example usage" doc, pasted
- * during this build): requests are GET with query-string parameters
+ * CONFIRMED (from Vision Helpdesk's own doc excerpts pasted during this
+ * build, including a real "get_tickets" example against
+ * visiononlinedemo.com): requests are GET with query-string parameters
  * against `{baseUrl}/api/index.php`, using `vis_module`/`vis_operation`
  * naming, `vis_encode=json` for JSON responses, and auth via either
  * `vis_txtusername` + `vis_txtuserpass` (MD5 hash of the password) or a
- * single `vis_txttoken`. The single-ticket lookup operation is
- * `ticket_details` with a numeric `vis_ticket_id`.
+ * single `vis_txttoken` passed as-is (no hashing) in the query string.
+ * Bulk listing is `vis_operation=get_tickets`, filterable via
+ * `vis_filter=<field>=<value>` (confirmed example: `status_id=1`). The
+ * single-ticket lookup operation is `ticket_details` with a numeric
+ * `vis_ticket_id`.
  *
- * STILL UNCONFIRMED: this session can't reach visionhelpdesk.com (egress
- * blocked), so the *bulk* "list tickets updated since X" operation name
- * and its response field names are a best guess (`get_tickets`, by
- * analogy with the confirmed `ticket_details`) — build spec section 17
- * item 4 lists exactly this as an open decision. If Vision Helpdesk only
- * exposes per-ticket lookup, not a list/search operation, this adapter
- * will need restructuring around a webhook or scheduled export instead
- * (both are explicitly allowed integration methods per spec 5.2.1).
+ * STILL UNCONFIRMED: Vision's numeric `status_id` scheme (which IDs mean
+ * open vs. closed) and whether `get_tickets` supports any date-range or
+ * "updated since" filter — the only confirmed `vis_filter` field is
+ * `status_id`. Because of that, this client does not send a date filter;
+ * it fetches the full ticket list each sync and relies on the idempotent
+ * upsert in `syncVisionTickets()` to make repeated syncs cheap and safe.
+ * The `since` parameter is accepted for interface parity with the mock
+ * client but currently unused by the real HTTP path — wire it to
+ * `vis_filter` once Heritage confirms the status_id scheme or a real
+ * date-filter field with Vision support.
  */
 export class HttpVisionClient implements VisionClient {
   constructor(
@@ -48,14 +54,16 @@ export class HttpVisionClient implements VisionClient {
     throw new Error("Vision Helpdesk auth requires either a token or a username+password");
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for VisionClient interface parity; see class doc
   async fetchRecentTickets(since: Date): Promise<NormalizedVisionTicket[]> {
     const url = new URL(this.endpointPath, this.baseUrl);
     const params = {
       ...this.authParams(),
       vis_module: "ticket",
-      vis_operation: "get_tickets", // unconfirmed — see class doc
+      vis_operation: "get_tickets", // confirmed
       vis_encode: "json",
-      vis_updated_since: since.toISOString(),
+      // No confirmed date-range filter exists yet — see class doc.
+      // The idempotent upsert downstream makes a full re-fetch safe.
     };
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
