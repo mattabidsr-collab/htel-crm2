@@ -21,11 +21,14 @@ const envSchema = z.object({
     .default("development"),
 
   // Optional integration credentials. Absent in dev/test — those paths
-  // fall back to mock adapters so the surrounding pipeline stays testable.
-  SKYSWITCH_CLIENT_ID: z.string().optional(),
-  SKYSWITCH_CLIENT_SECRET: z.string().optional(),
-  SKYSWITCH_API_BASE_URL: z.string().optional(),
-  SKYSWITCH_TOKEN_URL: z.string().optional(),
+  // fall back to mock adapters (or, for ConnectUC, simply reject inbound
+  // webhooks) so the surrounding pipeline stays testable.
+
+  // Shared secret ConnectUC/Activepieces webhook calls must present via
+  // `Authorization: Bearer <secret>`. There's no adapter to mock here —
+  // it's a push-based webhook, not a client we call out to — so unset
+  // means "reject all webhook calls" rather than "use mock data."
+  CONNECTUC_WEBHOOK_SECRET: z.string().optional(),
 
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),

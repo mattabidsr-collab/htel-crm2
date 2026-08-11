@@ -4,10 +4,10 @@ Heritage Telecom's (ACL Telecom LLC dba Heritage Telecom) operational system of 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the full requirements and phased delivery plan.
 
 This repository holds **Stage 0 (scaffold) + Stage 1 (Foundation) + Stage 2 (Telecom +
-contracts) + call notes, SkySwitch CDR prefill, and Outlook email sync + Vision Helpdesk ticket
+contracts) + call notes/transcripts via ConnectUC + Outlook email sync + Vision Helpdesk ticket
 integration**: auth/roles/MFA, the audit log, navigation, organizations/sites/contacts, telecom
-inventory/compliance/contracts, call logging, customer email synchronization, and a read-only
-support-ticket projection with identity mapping.
+inventory/compliance/contracts, call logging with transcripts, customer email synchronization,
+and a read-only support-ticket projection with identity mapping.
 
 ## Stack
 
@@ -51,8 +51,9 @@ src/
     mailboxes/
     email/              # matching.ts (pure) + sync.ts + review.ts (association review queue)
     vision/             # sync.ts + mapping.ts (identity review queue) + metrics-calc.ts (pure)
+    connectuc/           # ingest.ts (webhook orchestration: CDR + transcription events)
   integrations/
-    skyswitch/           # CDR client (HTTP + mock) + sync orchestration
+    connectuc/            # normalize.ts (pure) — raw ConnectUC webhook payload → CallNote fields
     email/                # EmailProvider interface: Microsoft Graph (real) + mock
     vision/                # VisionClient interface: Vision Helpdesk HTTP client + mock
 ```
@@ -82,10 +83,12 @@ pnpm dev                       # http://localhost:3000
 Sign in with the seeded administrator, then immediately enroll MFA — the app enforces this
 before letting an administrator account do anything else (ADM-01).
 
-SkySwitch, Microsoft Graph (Outlook), and Vision Helpdesk credentials are all optional — without
-them, `/admin/integrations` and `/admin/mailboxes` run against mock adapters that generate
-realistic data against real records already in the database, so the full sync/matching/review
-pipeline works without any external account. See `.env.example` for the credential env vars.
+Microsoft Graph (Outlook) and Vision Helpdesk credentials are optional — without them,
+`/admin/integrations` and `/admin/mailboxes` run against mock adapters that generate realistic
+data against real records already in the database, so the full sync/matching/review pipeline
+works without any external account. ConnectUC is different: it's a push-based webhook, not a
+client this app calls out to, so there's no mock mode — set `CONNECTUC_WEBHOOK_SECRET` and use
+curl (see below) to exercise it locally. See `.env.example` for all credential env vars.
 
 Other scripts:
 
@@ -142,32 +145,62 @@ Documented simplifications from this pass:
 - `ServiceType` stays an enum rather than an admin-configurable reference table, consistent with
   Stage 1's `OrganizationType`/`ContactRole` enums
 
-Call notes, SkySwitch CDR prefill, and Outlook email sync, this pass:
+Call notes, ConnectUC call logs/transcripts, and Outlook email sync, this pass:
 
 - Call notes (ACT-11/12/13): manual create from the org workspace, next-action creates a
   linked Task, shown on the Activity tab
-- SkySwitch CDR adapter (`src/integrations/skyswitch/`): OAuth2 client-credentials HTTP client
-  (**endpoint schema unverified — this sandbox can't reach developers.skyswitch.com**) plus a
-  deterministic mock client; the sync matches caller/callee numbers against the DID inventory
-  and creates draft call notes flagged `needsReview` (a human still fills in the substantive
-  note, per spec 5.7.6), idempotent via `externalCallId`
+- ConnectUC call logs and transcripts (`src/integrations/connectuc/`, `src/modules/connectuc/`):
+  **push-based**, not polled — an Activepieces flow holds ConnectUC's own OAuth2 connection and
+  POSTs webhook events to `/api/v1/integrations/connectuc/{cdr,transcription}`, authenticated by
+  a shared secret (`CONNECTUC_WEBHOOK_SECRET`) rather than a user session (see `PUBLIC_PATHS` in
+  `src/proxy.ts`). A "New CDR" event matches caller/callee numbers against the DID inventory
+  (across every organization — the webhook isn't scoped to one platform account/domain) and
+  creates a draft call note flagged `needsReview` (a human still fills in the substantive note,
+  per spec 5.7.6), idempotent on ConnectUC's `origCallid`. A "New Call Transcription" event
+  attaches transcript text/segments/summary to the matching call note, correlated via `cdrId`/
+  `callId` against either of the two call-leg IDs ConnectUC provides; if no matching CDR note
+  exists yet, the transcript is logged and dropped rather than created as an orphan (call notes
+  require an organization to attribute to — see the code comment in `modules/connectuc/ingest.ts`
+  for when this would need a proper review queue instead)
+- This replaces the earlier SkySwitch CDR polling adapter (OAuth2 client-credentials, guessed
+  endpoint schema, never verified) — Heritage's real telephony platform turned out to already
+  have Activepieces webhook support with a confirmed, documented payload shape, which is a
+  strictly better integration point than an unverified polling API
 - Outlook email sync (section 5.6, ACT-06–15) via Microsoft Graph app-only auth (real adapter,
-  standard/documented API — unlike SkySwitch this isn't a guess, but Heritage's actual Entra ID
-  app registration is still unverified) plus a mock provider; HTML sanitized before storage
-  (ACT-14, strips scripts/tracking pixels), attachment metadata only — no bytes copied (ACT-15),
-  idempotent via `providerMessageId`
+  standard/documented API — this isn't a guess, but Heritage's actual Entra ID app registration
+  is still unverified) plus a mock provider; HTML sanitized before storage (ACT-14, strips
+  scripts/tracking pixels), attachment metadata only — no bytes copied (ACT-15), idempotent via
+  `providerMessageId`
 - Participant matching (ACT-07): exact contact-email match only; conflicting/unmatched senders
   land in the `/admin/email-review` queue rather than being guessed, with manual
   associate/exclude actions (ACT-10), all audited
 - Exclusion rules (ACT-09): internal-domain and common automated-sender patterns
   (`noreply@`, etc.) auto-excluded from customer timelines
-- `/admin/integrations` shows live-vs-mock status per integration and triggers syncs on demand
-  (still no cron infra)
+- `/admin/integrations` shows configured/mock status per integration; ConnectUC has no manual
+  sync button since it's push-based, the others still trigger syncs on demand (no cron infra)
 
-Verified live in this pass: the full mock-provider pipeline end-to-end (CDR matching → draft
-call note → review completion; email ingestion → sanitization → matching/exclusion/ambiguous
-routing → manual association), including idempotency on repeated syncs. Not verified: the real
-SkySwitch and Microsoft Graph HTTP calls themselves — no live credentials were available.
+ConnectUC's webhook payload shape (field names, auth-less webhook body, dual call-leg IDs) is
+confirmed directly from the ConnectUC piece's own source in the Activepieces GitHub repo
+(`packages/pieces/community/connectuc`) — not a guess, and not blocked by egress the way
+SkySwitch's and Vision's docs were. One real bug found via live curl testing before this shipped:
+DIDs are stored E.164 (`+13135551111`) but ConnectUC's confirmed CDR example sends bare digits
+(`"17869811611"`, no `+`), so exact-string DID matching silently matched nothing — fixed with
+`phoneNumberCandidates()` in `src/integrations/connectuc/normalize.ts`, which generates every
+plausible format variant of an incoming number before matching. Unconfirmed: the exact field name
+for a transcript comment's creation timestamp (read defensively, not required), and whether a
+transcription event's `cdrId`/`callId` reliably matches the CDR event's `origCallid` vs.
+`termCallid` — both are checked as candidates since real ConnectUC traffic hasn't been observed
+yet.
+
+Verified live in this pass: the full ConnectUC webhook pipeline end-to-end via curl (CDR event →
+draft call note with DID/org attribution → transcription event → transcript attached to the
+correct call note by correlation ID → rendered on the Activity tab), including idempotency on a
+redelivered CDR event and correct drop-and-log behavior for unmatched numbers and orphaned
+transcripts — confirmed via direct database queries and a Playwright browser walkthrough. Also
+verified: the full mock-provider pipeline for email (ingestion → sanitization → matching/
+exclusion/ambiguous routing → manual association), including idempotency on repeated syncs. Not
+verified: the real Microsoft Graph HTTP calls, or ConnectUC webhook delivery from a real
+Activepieces flow — no live Entra ID or Activepieces/ConnectUC credentials were available.
 
 Vision Helpdesk ticket integration, this pass:
 

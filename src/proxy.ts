@@ -5,7 +5,14 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/v1/health"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth",
+  "/api/v1/health",
+  // Inbound service-to-service webhooks — authenticated by a shared secret
+  // inside the route handler (requireWebhookSecret), not a user session.
+  "/api/v1/integrations/connectuc",
+];
 const MFA_SETUP_PATHS = ["/settings/mfa", "/api/v1/auth/mfa"];
 
 export default auth((req) => {

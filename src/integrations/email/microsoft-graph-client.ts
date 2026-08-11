@@ -27,10 +27,10 @@ const MESSAGE_FIELDS =
  *
  * The Graph API surface here (endpoints, field names, OAuth token flow)
  * is Microsoft's stable, documented v1.0 API and is implemented directly
- * against that spec — this is not a guess the way the SkySwitch adapter
- * is. What's still unverified in this sandbox is Heritage's actual Entra
- * ID app registration (client ID/secret, tenant, and that Mail.Read has
- * been granted admin consent) — nothing here can be run without it.
+ * against that spec — this is not a guess. What's still unverified in
+ * this sandbox is Heritage's actual Entra ID app registration (client
+ * ID/secret, tenant, and that Mail.Read has been granted admin consent)
+ * — nothing here can be run without it.
  */
 export class MicrosoftGraphEmailProvider implements EmailProvider {
   private cachedToken: { value: string; expiresAt: number } | null = null;

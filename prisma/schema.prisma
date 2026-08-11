@@ -232,7 +232,7 @@ enum CallDirection {
 // created with needsReview=true and a placeholder summary.
 enum CallNoteSource {
   MANUAL
-  SKYSWITCH_CDR
+  CONNECTUC // pushed via Activepieces webhooks (CDR and/or call transcription events)
 }
 
 model CallNote {
@@ -256,10 +256,17 @@ model CallNote {
   source         CallNoteSource @default(MANUAL)
   needsReview    Boolean        @default(false)
   durationSeconds Int?
-  externalCallId String?        @unique // SkySwitch CDR ID, for idempotent sync
+  externalCallId String?        @unique // ConnectUC origCallid, for idempotent webhook ingest
+  terminatingCallId String?     // ConnectUC termCallid — a second correlation key so a
+                                 // transcription webhook (cdrId/callId) can still be matched
+                                 // to its CDR note if it references the other leg's ID
+  transcriptText     String?    // ConnectUC call transcription, speaker-attributed lines joined
+  transcriptSegments Json?      // raw { speaker, comment, startTime, endTime }[] from ConnectUC
+  transcriptSummary  String?    // ConnectUC's auto-generated call summary, if present
   createdAt      DateTime       @default(now())
 
   @@index([organizationId])
+  @@index([terminatingCallId])
   @@map("call_notes")
 }
 

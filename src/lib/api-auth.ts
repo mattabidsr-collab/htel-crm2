@@ -27,6 +27,20 @@ export async function requireRole(...roles: UserRole[]) {
   return user;
 }
 
+/**
+ * Auth for inbound service-to-service webhooks (e.g. Activepieces calling
+ * in on behalf of ConnectUC) — a shared secret in the Authorization
+ * header, not a user session. These routes must also be listed in
+ * `PUBLIC_PATHS` in `src/proxy.ts` so the session-based route guard lets
+ * the request through to this check at all.
+ */
+export function requireWebhookSecret(request: Request, expected: string | undefined) {
+  const provided = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!expected || provided !== expected) {
+    throw new ApiAuthError(401, "Invalid or missing webhook secret");
+  }
+}
+
 export function toErrorResponse(error: unknown) {
   if (error instanceof ApiAuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });

@@ -2,14 +2,17 @@ import { UserRole } from "@prisma/client";
 
 import { requirePageRole } from "@/lib/require-page-role";
 import { SyncButton } from "@/components/admin/SyncButton";
+import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 
 export default async function AdminIntegrationsPage() {
   await requirePageRole(UserRole.ADMINISTRATOR);
 
-  const skySwitchConfigured = Boolean(
-    env.SKYSWITCH_CLIENT_ID && env.SKYSWITCH_CLIENT_SECRET && env.SKYSWITCH_API_BASE_URL,
-  );
+  const connectUcConfigured = Boolean(env.CONNECTUC_WEBHOOK_SECRET);
+  const [connectUcCount, lastConnectUcNote] = await Promise.all([
+    db.callNote.count({ where: { source: "CONNECTUC" } }),
+    db.callNote.findFirst({ where: { source: "CONNECTUC" }, orderBy: { createdAt: "desc" } }),
+  ]);
   const microsoftConfigured = Boolean(
     env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET && env.MICROSOFT_TENANT_ID,
   );
@@ -22,24 +25,43 @@ export default async function AdminIntegrationsPage() {
     <div>
       <h1>Integrations</h1>
       <p className="page-subtitle">
-        No cron infrastructure is wired up yet, so syncs run on demand from here.
+        No cron infrastructure is wired up yet, so polling syncs run on demand from here.
+        ConnectUC is push-based (webhooks via Activepieces) and needs no manual sync.
       </p>
 
       <section className="home__card">
-        <h2>SkySwitch call logs</h2>
+        <h2>ConnectUC call logs &amp; transcripts</h2>
         <p>
           Status:{" "}
-          {skySwitchConfigured ? (
-            <span className="badge">Live credentials configured</span>
+          {connectUcConfigured ? (
+            <span className="badge">Webhook secret configured</span>
           ) : (
-            <span className="badge badge-warn">Using mock client — set SKYSWITCH_* env vars for live data</span>
+            <span className="badge badge-warn">
+              CONNECTUC_WEBHOOK_SECRET is unset — all webhook calls are rejected
+            </span>
           )}
         </p>
         <p className="page-subtitle">
-          Pulls recent CDRs, matches numbers against the DID inventory, and creates draft call
-          notes flagged &ldquo;needs review.&rdquo;
+          An Activepieces flow holds the ConnectUC connection and POSTs &ldquo;New CDR&rdquo; and
+          &ldquo;New Call Transcription&rdquo; events to the webhook endpoints below. CDR events
+          match caller/callee numbers against the DID inventory and create draft call notes
+          flagged &ldquo;needs review&rdquo;; transcription events attach transcript text to the
+          matching call note once one exists.
         </p>
-        <SyncButton endpoint="/api/v1/integrations/skyswitch/sync" label="Sync call logs" />
+        <ul>
+          <li>
+            <code>POST /api/v1/integrations/connectuc/cdr</code>
+          </li>
+          <li>
+            <code>POST /api/v1/integrations/connectuc/transcription</code>
+          </li>
+        </ul>
+        <p className="page-subtitle">
+          Both require <code>Authorization: Bearer &lt;CONNECTUC_WEBHOOK_SECRET&gt;</code>.{" "}
+          {connectUcCount} call note{connectUcCount === 1 ? "" : "s"} synced from ConnectUC so far
+          {lastConnectUcNote && `, most recently ${lastConnectUcNote.createdAt.toISOString().slice(0, 16).replace("T", " ")}`}
+          .
+        </p>
       </section>
 
       <section className="home__card">

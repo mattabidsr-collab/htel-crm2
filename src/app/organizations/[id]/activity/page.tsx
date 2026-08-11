@@ -37,10 +37,17 @@ export default async function OrganizationActivityPage(
                 <td>
                   {note.summary}
                   {note.needsReview && <span className="badge badge-warn"> Needs review</span>}
+                  {note.transcriptSummary && <p className="page-subtitle">{note.transcriptSummary}</p>}
+                  {note.transcriptText && (
+                    <details>
+                      <summary>Transcript</summary>
+                      <pre className="email-message__body">{note.transcriptText}</pre>
+                    </details>
+                  )}
                 </td>
                 <td>{note.disposition ?? "—"}</td>
                 <td>{note.author?.name ?? "System"}</td>
-                <td>{note.source === "SKYSWITCH_CDR" ? "SkySwitch CDR" : "Manual"}</td>
+                <td>{note.source === "CONNECTUC" ? "ConnectUC" : "Manual"}</td>
                 <td>{note.needsReview && <CallNoteReviewForm callNoteId={note.id} />}</td>
               </tr>
             ))}
