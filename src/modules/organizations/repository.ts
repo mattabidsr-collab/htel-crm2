@@ -6,7 +6,13 @@ export function createOrganization(input: CreateOrganizationInput) {
 }
 
 export function findOrganizationById(id: string) {
-  return db.organization.findFirst({ where: { id, deletedAt: null } });
+  return db.organization.findFirst({
+    where: { id, deletedAt: null },
+    include: {
+      owner: { select: { id: true, name: true, email: true } },
+      parent: { select: { id: true, name: true } },
+    },
+  });
 }
 
 // ACC-06: duplicate detection checks normalized organization name during entry.

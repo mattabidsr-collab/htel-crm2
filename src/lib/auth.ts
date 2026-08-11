@@ -1,55 +1,73 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 
 import { db } from "@/lib/db";
 import { recordAuditEvent } from "@/lib/audit";
-import type { UserRole } from "@prisma/client";
+import { verifyMfaToken } from "@/modules/auth/mfa";
+import { authConfig } from "@/lib/auth.config";
 
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string;
-      role: UserRole;
-      mfaEnabled: boolean;
-    } & DefaultSessionUser;
-  }
+class InvalidCredentialsError extends CredentialsSignin {
+  code = "invalid_credentials";
 }
 
-// Minimal shape kept local so we don't depend on next-auth's internal type export path.
-type DefaultSessionUser = { name?: string | null; email?: string | null };
+class MfaRequiredError extends CredentialsSignin {
+  code = "mfa_required";
+}
+
+class InvalidMfaCodeError extends CredentialsSignin {
+  code = "invalid_mfa_code";
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
+  ...authConfig,
   providers: [
     Credentials({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        totp: { label: "Authenticator code", type: "text" },
       },
       async authorize(credentials) {
         const email = credentials?.email;
         const password = credentials?.password;
-        if (typeof email !== "string" || typeof password !== "string") return null;
+        const totp = credentials?.totp;
+        if (typeof email !== "string" || typeof password !== "string") {
+          throw new InvalidCredentialsError();
+        }
 
         const user = await db.user.findUnique({ where: { email } });
-        if (!user || !user.isActive) return null;
+        if (!user || !user.isActive) {
+          throw new InvalidCredentialsError();
+        }
 
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) {
+        const validPassword = await bcrypt.compare(password, user.passwordHash);
+        if (!validPassword) {
           await recordAuditEvent({
             actorId: user.id,
             action: "auth.login_failed",
             entityType: "User",
             entityId: user.id,
           });
-          return null;
+          throw new InvalidCredentialsError();
         }
 
-        // ADM-01: MFA is required for administrators. The challenge/verify flow
-        // is implemented in Stage 1 (Foundation); this stub records the
-        // requirement on the session so the UI can gate access to it.
+        // ADM-01: MFA is required for administrators, available to everyone.
+        if (user.mfaEnabled) {
+          if (typeof totp !== "string" || totp.length === 0) {
+            throw new MfaRequiredError();
+          }
+          if (!user.mfaSecretEncrypted || !verifyMfaToken(user.mfaSecretEncrypted, totp)) {
+            await recordAuditEvent({
+              actorId: user.id,
+              action: "auth.mfa_failed",
+              entityType: "User",
+              entityId: user.id,
+            });
+            throw new InvalidMfaCodeError();
+          }
+        }
+
         await recordAuditEvent({
           actorId: user.id,
           action: "auth.login_succeeded",
@@ -57,23 +75,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           entityId: user.id,
         });
 
-        return { id: user.id, name: user.name, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled };
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          mfaEnabled: user.mfaEnabled,
+        };
       },
     }),
   ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.role = (user as { role: UserRole }).role;
-        token.mfaEnabled = (user as { mfaEnabled: boolean }).mfaEnabled;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      session.user.id = token.sub as string;
-      session.user.role = token.role as UserRole;
-      session.user.mfaEnabled = token.mfaEnabled as boolean;
-      return session;
-    },
-  },
 });

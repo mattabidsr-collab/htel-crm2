@@ -12,6 +12,7 @@ jobs:
       DATABASE_URL: postgresql://htelcrm:htelcrm@localhost:5432/htelcrm?schema=public
       REDIS_URL: redis://localhost:6379
       AUTH_SECRET: ci-placeholder-secret
+      APP_ENCRYPTION_KEY: ci-placeholder-encryption-key-32-bytes-min
       STORAGE_ENDPOINT: http://localhost:9000
       STORAGE_REGION: us-east-1
       STORAGE_BUCKET: htel-crm-documents

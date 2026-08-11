@@ -33,7 +33,7 @@ model User {
   passwordHash String
   role         UserRole
   mfaEnabled   Boolean   @default(false)
-  mfaSecretRef String? // reference into the secrets manager; never a raw secret (TEL-10)
+  mfaSecretEncrypted String? // AES-256-GCM ciphertext of the TOTP secret (see src/lib/crypto.ts); never stored in plaintext
   isActive     Boolean   @default(true)
   deactivatedAt DateTime?
   createdAt    DateTime  @default(now())
@@ -42,6 +42,8 @@ model User {
   ownedOrganizations Organization[]  @relation("OrganizationOwner")
   auditEvents        AuditEvent[]
   callNotes          CallNote[]
+  ownedTasks         Task[]          @relation("TaskOwner")
+  createdTasks       Task[]          @relation("TaskCreatedBy")
 
   @@map("users")
 }
@@ -97,6 +99,7 @@ model Organization {
   sites        Site[]
   affiliations ContactAffiliation[]
   callNotes    CallNote[]
+  tasks        Task[]
 
   @@index([parentId])
   @@index([lifecycleStatus])
@@ -227,6 +230,47 @@ model CallNote {
 
   @@index([organizationId])
   @@map("call_notes")
+}
+
+// --- Tasks (SUP-10, ADM-06) ------------------------------------------------
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Task {
+  id             String       @id @default(uuid()) @db.Uuid
+  title          String
+  description    String?
+  organizationId String?      @db.Uuid
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  relatedType    String? // e.g. "Site", "Contact", "Contract" — generic association to any major record
+  relatedId      String?
+  ownerId        String       @db.Uuid
+  owner          User         @relation("TaskOwner", fields: [ownerId], references: [id])
+  createdById    String       @db.Uuid
+  createdBy      User         @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  dueDate        DateTime?
+  recurrenceRule String?
+  status         TaskStatus   @default(OPEN)
+  priority       TaskPriority @default(NORMAL)
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([ownerId, status, dueDate])
+  @@index([organizationId])
+  @@map("tasks")
 }
 
 // --- Audit (ADM-03) -------------------------------------------------------

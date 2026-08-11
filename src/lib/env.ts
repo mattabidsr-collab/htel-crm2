@@ -5,6 +5,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   AUTH_SECRET: z.string().min(1),
   AUTH_URL: z.string().min(1).optional(),
+  APP_ENCRYPTION_KEY: z.string().min(32),
   STORAGE_ENDPOINT: z.string().min(1),
   STORAGE_REGION: z.string().min(1),
   STORAGE_BUCKET: z.string().min(1),
