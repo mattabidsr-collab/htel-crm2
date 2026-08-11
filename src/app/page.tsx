@@ -1,14 +1,15 @@
 import Link from "next/link";
 
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { CompleteTaskButton } from "@/components/tasks/CompleteTaskButton";
 import { CreateTaskForm } from "@/components/tasks/CreateTaskForm";
 import { computeActionDeadline } from "@/modules/contracts/renewal";
 import * as contractsService from "@/modules/contracts/service";
 import * as tasksService from "@/modules/tasks/service";
 
-// Home / My Work (section 8.1). Vision tickets and billing discrepancies
-// join this queue as those modules land in later stages.
+// Home / My Work (section 8.1). Billing discrepancies join this queue as
+// that module lands in a later stage.
 
 export default async function Home() {
   const session = await auth();
@@ -22,6 +23,13 @@ export default async function Home() {
   const urgentRenewals = allContracts
     .map((contract) => ({ contract, deadline: computeActionDeadline(contract) }))
     .filter(({ deadline }) => deadline && deadline <= in30Days);
+
+  const openTickets = await db.visionTicketProjection.findMany({
+    where: { isOpen: true },
+    include: { organization: { select: { id: true, name: true } } },
+    orderBy: { visionUpdatedAt: "desc" },
+    take: 10,
+  });
 
   return (
     <div className="home">
@@ -100,8 +108,26 @@ export default async function Home() {
         </section>
 
         <section className="home__card">
-          <h2>Open Vision tickets</h2>
-          <p className="home__empty-state">Vision integration lands in Stage 3.</p>
+          <h2>Open Vision tickets ({openTickets.length})</h2>
+          {openTickets.length === 0 ? (
+            <p className="home__empty-state">Nothing open.</p>
+          ) : (
+            <ul className="task-list">
+              {openTickets.map((ticket) => (
+                <li key={ticket.id} className="task-row">
+                  <span>
+                    {ticket.organization && (
+                      <Link href={`/organizations/${ticket.organization.id}/vision-tickets`}>
+                        {ticket.organization.name}
+                      </Link>
+                    )}
+                    {ticket.organization ? " — " : ""}
+                    {ticket.subject}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="home__card">

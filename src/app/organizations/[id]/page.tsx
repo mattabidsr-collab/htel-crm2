@@ -5,6 +5,8 @@ import { CompleteTaskButton } from "@/components/tasks/CompleteTaskButton";
 import { CreateTaskForm } from "@/components/tasks/CreateTaskForm";
 import * as sitesService from "@/modules/sites/service";
 import * as contactsService from "@/modules/contacts/service";
+import * as servicesService from "@/modules/services/service";
+import * as contractsService from "@/modules/contracts/service";
 import { db } from "@/lib/db";
 
 export default async function OrganizationOverviewPage(
@@ -13,13 +15,20 @@ export default async function OrganizationOverviewPage(
   const { id } = await props.params;
   const session = await auth();
 
-  const [sites, contacts, openTasks] = await Promise.all([
+  const [sites, contacts, openTasks, services, contracts, openTickets] = await Promise.all([
     sitesService.listSites({ organizationId: id, take: 5 }),
     contactsService.listContacts({ organizationId: id, take: 5 }),
     db.task.findMany({
       where: { organizationId: id, status: { in: ["OPEN", "IN_PROGRESS"] } },
       orderBy: { dueDate: "asc" },
       take: 10,
+    }),
+    servicesService.listServices({ organizationId: id }),
+    contractsService.listContracts({ organizationId: id }),
+    db.visionTicketProjection.findMany({
+      where: { organizationId: id, isOpen: true },
+      orderBy: { visionUpdatedAt: "desc" },
+      take: 5,
     }),
   ]);
 
@@ -76,18 +85,49 @@ export default async function OrganizationOverviewPage(
       </section>
 
       <section className="home__card">
-        <h2>Active services</h2>
-        <p className="home__empty-state">Telecom inventory lands in Stage 2.</p>
+        <h2>Active services ({services.length})</h2>
+        {services.length === 0 ? (
+          <p className="home__empty-state">No services yet.</p>
+        ) : (
+          <ul>
+            {services.slice(0, 5).map((service) => (
+              <li key={service.id}>
+                {service.type} × {service.quantity} ({service.status})
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link href={`/organizations/${id}/telecom`}>View telecom →</Link>
       </section>
 
       <section className="home__card">
-        <h2>Open Vision tickets</h2>
-        <p className="home__empty-state">Vision integration lands in Stage 3.</p>
+        <h2>Open Vision tickets ({openTickets.length})</h2>
+        {openTickets.length === 0 ? (
+          <p className="home__empty-state">No open tickets.</p>
+        ) : (
+          <ul>
+            {openTickets.map((ticket) => (
+              <li key={ticket.id}>{ticket.subject}</li>
+            ))}
+          </ul>
+        )}
+        <Link href={`/organizations/${id}/vision-tickets`}>View all tickets →</Link>
       </section>
 
       <section className="home__card">
-        <h2>Contracts</h2>
-        <p className="home__empty-state">Contracts &amp; renewals land in Stage 2.</p>
+        <h2>Contracts ({contracts.length})</h2>
+        {contracts.length === 0 ? (
+          <p className="home__empty-state">No contracts yet.</p>
+        ) : (
+          <ul>
+            {contracts.slice(0, 5).map((contract) => (
+              <li key={contract.id}>
+                {contract.type} — {contract.status}
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link href={`/organizations/${id}/contracts`}>View contracts →</Link>
       </section>
     </div>
   );

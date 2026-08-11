@@ -110,6 +110,8 @@ model Organization {
   contracts        Contract[]
   mrrSnapshots     MrrSnapshot[]
   emailThreads     EmailThread[]
+  visionTickets    VisionTicketProjection[]
+  visionIdentityMappings VisionIdentityMapping[]
 
   @@index([parentId])
   @@index([lifecycleStatus])
@@ -158,6 +160,7 @@ model Site {
   affiliations ContactAffiliation[]
   callNotes    CallNote[]
   services     Service[]
+  visionTickets VisionTicketProjection[]
 
   @@index([organizationId])
   @@map("sites")
@@ -181,6 +184,7 @@ model Contact {
   sitesAsContact Site[]
   callNotes     CallNote[]
   emailMessages EmailMessage[]
+  visionTickets VisionTicketProjection[]
 
   @@index([lastName, firstName])
   @@map("contacts")
@@ -607,6 +611,75 @@ model MrrSnapshot {
 
   @@index([organizationId, periodEnd])
   @@map("mrr_snapshots")
+}
+
+// --- Vision ticket integration (section 5.2 / SUP-01-10) -------------------
+//
+// Read-only. Vision remains authoritative for ticket status, assignment,
+// SLA, replies, and resolution (business rule 8) — this is a local
+// projection for account context and reporting only (SUP-01, SUP-09).
+
+// SUP-01: read-only local projection of required Vision ticket metadata,
+// keyed by Vision's immutable external ticket ID.
+model VisionTicketProjection {
+  id                 String      @id @default(uuid()) @db.Uuid
+  externalTicketId   String      @unique
+  externalUrl        String // SUP-02: deep link to the authoritative ticket in Vision
+  // Denormalized so a later manual identity mapping (SUP-07) can backfill
+  // organizationId on already-synced tickets without re-fetching Vision.
+  externalCustomerId String
+  subject            String
+  // Vision's status/category vocabulary is configurable on their end and
+  // unconfirmed here, so it's stored as free text; `isOpen` is the
+  // normalized field business logic (metrics, work queues) relies on.
+  status           String
+  isOpen           Boolean       @default(true)
+  priority         String?
+  category         String?
+  requesterEmail   String?
+  requesterName    String?
+  technician       String?
+  organizationId   String?       @db.Uuid
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+  siteId           String?       @db.Uuid
+  site             Site?         @relation(fields: [siteId], references: [id])
+  contactId        String?       @db.Uuid
+  contact          Contact?      @relation(fields: [contactId], references: [id])
+  visionCreatedAt  DateTime?
+  visionUpdatedAt  DateTime?
+  visionResolvedAt DateTime?
+  syncedAt         DateTime      @default(now())
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([organizationId])
+  @@index([isOpen])
+  @@index([externalCustomerId])
+  @@map("vision_ticket_projections")
+}
+
+enum VisionMappingStatus {
+  MAPPED
+  UNMAPPED
+  IGNORED
+}
+
+// SUP-03: durable, auditable external-ID mapping from a Vision customer
+// identity to a CRM organization. SUP-06/SUP-07: unmapped identities are
+// visible here for manual mapping rather than silently dropped.
+model VisionIdentityMapping {
+  id                   String              @id @default(uuid()) @db.Uuid
+  externalCustomerId   String              @unique
+  externalCustomerName String?
+  organizationId       String?             @db.Uuid
+  organization         Organization?       @relation(fields: [organizationId], references: [id])
+  status               VisionMappingStatus @default(UNMAPPED)
+  lastSeenAt           DateTime            @default(now())
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([status])
+  @@map("vision_identity_mappings")
 }
 
 // --- Customer email synchronization (section 5.6 / ACT-06-15) -------------

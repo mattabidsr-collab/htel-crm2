@@ -4,9 +4,10 @@ Heritage Telecom's (ACL Telecom LLC dba Heritage Telecom) operational system of 
 [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md) for the full requirements and phased delivery plan.
 
 This repository holds **Stage 0 (scaffold) + Stage 1 (Foundation) + Stage 2 (Telecom +
-contracts) + call notes, SkySwitch CDR prefill, and Outlook email sync**: auth/roles/MFA, the
-audit log, navigation, organizations/sites/contacts, telecom inventory/compliance/contracts,
-call logging, and customer email synchronization.
+contracts) + call notes, SkySwitch CDR prefill, and Outlook email sync + Vision Helpdesk ticket
+integration**: auth/roles/MFA, the audit log, navigation, organizations/sites/contacts, telecom
+inventory/compliance/contracts, call logging, customer email synchronization, and a read-only
+support-ticket projection with identity mapping.
 
 ## Stack
 
@@ -49,9 +50,11 @@ src/
     call-notes/
     mailboxes/
     email/              # matching.ts (pure) + sync.ts + review.ts (association review queue)
+    vision/             # sync.ts + mapping.ts (identity review queue) + metrics-calc.ts (pure)
   integrations/
     skyswitch/           # CDR client (HTTP + mock) + sync orchestration
     email/                # EmailProvider interface: Microsoft Graph (real) + mock
+    vision/                # VisionClient interface: Vision Helpdesk HTTP client + mock
 ```
 
 Each module follows the same pattern: a service layer that enforces business rules (e.g. ACC-06
@@ -79,10 +82,10 @@ pnpm dev                       # http://localhost:3000
 Sign in with the seeded administrator, then immediately enroll MFA — the app enforces this
 before letting an administrator account do anything else (ADM-01).
 
-SkySwitch and Microsoft Graph (Outlook) credentials are optional — without them, `/admin/
-integrations` and `/admin/mailboxes` run against mock adapters that generate realistic data
-against real records already in the database, so the full sync/matching/review pipeline works
-without any external account. See `.env.example` for the credential env vars.
+SkySwitch, Microsoft Graph (Outlook), and Vision Helpdesk credentials are all optional — without
+them, `/admin/integrations` and `/admin/mailboxes` run against mock adapters that generate
+realistic data against real records already in the database, so the full sync/matching/review
+pipeline works without any external account. See `.env.example` for the credential env vars.
 
 Other scripts:
 
@@ -166,9 +169,39 @@ call note → review completion; email ingestion → sanitization → matching/e
 routing → manual association), including idempotency on repeated syncs. Not verified: the real
 SkySwitch and Microsoft Graph HTTP calls themselves — no live credentials were available.
 
+Vision Helpdesk ticket integration, this pass:
+
+- Read-only ticket projection (SUP-01): `VisionTicketProjection` mirrors ticket id, subject,
+  status, priority, category, and timestamps from Vision; the org workspace's Vision Tickets tab
+  and the Home page's open-tickets list both read from this projection, never from Vision live —
+  Vision itself stays the authoritative system for ticket workflow (business rule 8), and there
+  are intentionally no reply/assign/status-change controls in this app (SUP-09)
+- Identity mapping + review queue (SUP-03/06/07): Vision's `externalCustomerId` doesn't line up
+  with our organization IDs, so `VisionIdentityMapping` tracks each external customer as
+  MAPPED/UNMAPPED/IGNORED; `/admin/vision-review` lists unmapped identities for an admin to map to
+  an organization or ignore. Mapping an identity backfills `organizationId` on every already-synced
+  ticket for that customer in one transaction, so tickets synced before mapping existed still show
+  up correctly afterward instead of being silently orphaned
+- Support metrics (SUP-08): open count, tickets in the last 90 days, oldest-open-ticket age, and
+  repeat-issue categories, computed by a pure `summarizeTickets()` function (unit tested) and
+  shown on the Vision Tickets tab
+- Global search now includes Vision tickets by ticket ID or subject (ADM-04)
+- `/admin/integrations` shows live-vs-mock status for Vision alongside SkySwitch and Microsoft
+  Graph, with a manual sync trigger (still no cron infra)
+
+Vision's real API shape came from the user's own live system access, not public docs (this
+sandbox's egress proxy blocks `visionhelpdesk.com` and its subdomains) — confirmed details:
+tickets are addressed by **two** IDs, a mask (e.g. `QBZC-364991`) and a numeric ID (e.g. `78077`),
+both captured on the projection; requests are `GET` with query-string params against
+`/api/index.php`, using a `vis_module`/`vis_operation` convention (confirmed for
+`ticket_details`), `vis_encode=json`, and auth via either `vis_txttoken` or
+`vis_txtusername`/MD5-hashed `vis_txtuserpass`. Unconfirmed: the bulk/recent-tickets operation
+name used by `fetchRecentTickets()` (`get_tickets`) — only single-ticket lookup was confirmed in
+the doc excerpt provided, so this is a documented guess pending the real API reference.
+
 Not yet built (see `docs/BUILD_SPEC.md` section 14 for the staged delivery plan):
 
-- Vision ticket integration, billing reconciliation, dashboards, GoHighLevel sync (Stages 3–5)
+- Billing reconciliation, dashboards, GoHighLevel sync (Stages 4–5)
 - Record-level permissions (MVP uses module-level roles per spec section 3)
 - Contact/site/service/DID/call-note/email edit and delete flows
 - Global quick-create for call notes (ACT-13 mentions this alongside the account-workspace

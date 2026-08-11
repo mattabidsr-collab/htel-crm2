@@ -5,7 +5,9 @@ import { searchAll } from "@/modules/search/service";
 export default async function SearchPage(props: PageProps<"/search">) {
   const searchParams = await props.searchParams;
   const q = typeof searchParams.q === "string" ? searchParams.q : "";
-  const results = q ? await searchAll(q) : { organizations: [], sites: [], contacts: [], dids: [] };
+  const results = q
+    ? await searchAll(q)
+    : { organizations: [], sites: [], contacts: [], dids: [], visionTickets: [] };
 
   return (
     <div>
@@ -68,10 +70,30 @@ export default async function SearchPage(props: PageProps<"/search">) {
         </ul>
       </section>
 
+      <section className="home__card">
+        <h2>Vision tickets ({results.visionTickets.length})</h2>
+        <ul>
+          {results.visionTickets.map((ticket) => (
+            <li key={ticket.id}>
+              {ticket.organization ? (
+                <Link href={`/organizations/${ticket.organization.id}/vision-tickets`}>
+                  {ticket.externalTicketId} — {ticket.subject} ({ticket.organization.name})
+                </Link>
+              ) : (
+                <span>
+                  {ticket.externalTicketId} — {ticket.subject} (unmapped)
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {results.organizations.length === 0 &&
         results.sites.length === 0 &&
         results.contacts.length === 0 &&
-        results.dids.length === 0 && <p className="home__empty-state">No matches.</p>}
+        results.dids.length === 0 &&
+        results.visionTickets.length === 0 && <p className="home__empty-state">No matches.</p>}
     </div>
   );
 }

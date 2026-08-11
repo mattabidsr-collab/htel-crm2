@@ -30,6 +30,11 @@ const envSchema = z.object({
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   MICROSOFT_TENANT_ID: z.string().optional(),
+
+  VISION_API_BASE_URL: z.string().optional(),
+  VISION_API_TOKEN: z.string().optional(),
+  VISION_API_USERNAME: z.string().optional(),
+  VISION_API_PASSWORD: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
